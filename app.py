@@ -997,7 +997,7 @@ def render_agenda_cards_grandes(sig, tab):
                         style={"backgroundColor": "#0d6efd", "fontSize": "18px"}),
                 html.Div(cards_do_tecnico, className="p-3", style={"backgroundColor": "#212529"})
             ], className="h-100 shadow-sm")
-        ], width=12, md=10, lg=10)
+        ], width=12, md=7, lg=10)
 
         colunas_tecnicos.append(coluna)
 
@@ -1044,4 +1044,5 @@ def gerenciar_modal_manutencao(n_novo, n_editar, n_fechar, n_salvar, is_open):
 
 # INICIALIZAÇÃO DO SERVIDOR (Apenas uma vez no final do arquivo)
 if __name__ == '__main__':
+
     app.run(debug=True, port=8050)
