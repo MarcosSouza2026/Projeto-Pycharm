@@ -992,9 +992,9 @@ def render_agenda_cards_grandes(sig, tab):
         # Montagem da Coluna
         coluna = dbc.Col([
             html.Div([
-                html.H4([html.I(className="bi bi-person-workspace me-2"), tec.upper()],
+                html.H4([html.I(className="bi bi-person-workspace mb-2"), tec.upper()],
                         className="text-center p-3 text-white fw-bold rounded-top mb-0",
-                        style={"backgroundColor": "#0d6efd", "fontSize": "18px"}),
+                        style={"backgroundColor": "#0d6efd", "fontSize": "13px"}),
                 html.Div(cards_do_tecnico, className="p-3", style={"backgroundColor": "#212529"})
             ], className="h-100 shadow-sm")
         ], width=8, md=4, lg=8)
@@ -1046,5 +1046,6 @@ def gerenciar_modal_manutencao(n_novo, n_editar, n_fechar, n_salvar, is_open):
 if __name__ == '__main__':
 
     app.run(debug=True, port=8050)
+
 
 
