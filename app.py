@@ -1,5 +1,5 @@
+
 import dash
-import dash_bootstrap_components as dbc
 from dash import dcc, html, Input, Output, State, ALL, callback_context
 import pandas as pd
 import dash_bootstrap_components as dbc
@@ -10,6 +10,7 @@ import flask
 from flask import send_from_directory
 import dash_quill
 from datetime import datetime
+from dash.exceptions import PreventUpdate
 
 # --- 1. CONFIGURAÇÕES E DADOS ---
 CSV_FILE = 'instalacoes.csv'
@@ -63,16 +64,9 @@ def load_data():
 
 init_csv()
 
-app = dash.Dash(
-    __name__,
-    external_stylesheets=[dbc.themes.DARKLY, dbc.icons.BOOTSTRAP],
-    suppress_callback_exceptions=True,
-    # Isso garante que o app se ajuste à tela do celular:
-    meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}]
-)
-
-# 2. ESSA LINHA É A MAIS IMPORTANTE PARA A NUVEM:
-server = app.server
+app = dash.Dash(__name__,
+                external_stylesheets=[dbc.themes.DARKLY, dbc.icons.BOOTSTRAP],
+                suppress_callback_exceptions=True)
 
 
 @app.server.route('/download/<path:filename>')
@@ -204,13 +198,31 @@ modal_manutencao_simples = dbc.Modal([
                 dbc.Label("Técnico:"),
                 dcc.Dropdown(
                     id="tec-manutencao",
-                    options=[{'label': t, 'value': t} for t in LISTA_TECNICOS]
+                    options=[{'label': t, 'value': t} for t in LISTA_TECNICOS],
+                    style={"color": "#000"}
                 ),
             ], width=6),
         ], className="mb-3"),
 
+        # --- INÍCIO DA MUDANÇA: ADICIONANDO O CALENDÁRIO AQUI ---
+        # --- BLOCO CORRIGIDO SEM O ERRO DE 'LOCALE' ---
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("Data do Agendamento:"),
+                html.Br(),
+                dcc.DatePickerSingle(
+                    id='data-manutencao-simples',
+                    date=datetime.now().date(),
+                    display_format='DD/MM/YYYY',
+                    style={'width': '100%'}
+                    # A LINHA LOCALE FOI REMOVIDA DAQUI
+                ),
+            ], width=12),
+        ], className="mb-3"),
+        # --- FIM DA MUDANÇA ---
+
         dbc.Label("Status da Manutenção:"),
-        html.Div([  # <-- Verifique se esta linha está alinhada com o dbc.Label acima
+        html.Div([
             dbc.RadioItems(
                 id="status-manutencao",
                 options=[
@@ -224,7 +236,17 @@ modal_manutencao_simples = dbc.Modal([
                 labelClassName="btn btn-outline-primary me-2",
                 labelCheckedClassName="active",
             ),
-        ], className="mb-3"),  # <-- Verifique se este fechamento também está alinhado
+        ], className="mb-3"),
+
+        # ... Restante do código (Descrição/Botões) ...
+
+        # ESTE É O CAMPO QUE VAI "BROTAR"
+        html.Div([
+            dbc.Label("Motivo da Pendência / Relato de Finalização:", style={"color": "#ffc107", "fontWeight": "bold"}),
+            dbc.Textarea(id="desc-justificativa-status",
+                         placeholder="Descreva o motivo aqui...",
+                         style={"height": "80px"}),
+        ], id="container-justificativa", style={"display": "none", "marginBottom": "15px"}),
 
         dbc.Label("Descrição/Problema:"),
         dbc.Textarea(id="desc-manutencao", style={"height": "70px"}, className="mb-3"),
@@ -331,6 +353,19 @@ modal_manutencao_simples = dbc.Modal([
         dbc.Label("Nome do Cliente:"),
         dbc.Input(id="nome-manutencao-simples", placeholder="Digite o nome...", type="text"),
         html.Br(),
+
+        # --- ADICIONE ESTE BLOCO AQUI ---
+        dbc.Label("Data do Agendamento:"),
+        html.Br(),
+        dcc.DatePickerSingle(
+            id='data-manutencao-simples',  # Guarde esse ID
+            date=datetime.now().date(),
+            display_format='DD/MM/YYYY',
+            style={'width': '100%'}
+        ),
+        html.Br(), html.Br(),
+        # -------------------------------
+
         dbc.Label("Descrição do Problema:"),
         dbc.Textarea(id="desc-manutencao-simples", placeholder="O que aconteceu?")
     ]),
@@ -419,25 +454,16 @@ def render_aba_base():
 # --- CALLBACKS GERAIS ---
 @app.callback(Output("conteudo-aba", "children"), Input("tabs-principal", "active_tab"))
 def alternar_abas(tab_ativa):
-    if tab_ativa == "tab-kit": return render_aba_kit()
-    if tab_ativa == "tab-base": return render_aba_base()
+    if tab_ativa == "tab-kit":
+        return render_aba_kit()
+    if tab_ativa == "tab-base":
+        return render_aba_base()
+    if tab_ativa == "tab-os":
+        return render_aba_os()
     if tab_ativa == "tab-agenda":
-        # Retorna a estrutura da agenda com IDs exclusivos
-        return html.Div([
-            dbc.Tabs([
-                dbc.Tab(label="DIVINÓPOLIS", tab_id="ag-div"),
-                dbc.Tab(label="ITAÚNA", tab_id="ag-ita"),
-            ], id="tabs-agenda-cidades", active_tab="ag-div", className="mb-3"),
-            dbc.Row([
-                dbc.Col(
-                    dbc.Button([html.I(className="bi bi-plus-circle me-2"), "Nova Manutenção"], id="btn-nova-agenda",
-                               color="success"), width="auto")
-            ], justify="end", className="mb-3"),
-            # ESTE ID ABAIXO TEM QUE SER DIFERENTE DO DA ABA PRINCIPAL
-            dcc.Loading(html.Div(id="cards-agenda-area", className="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4"),
-                        type="dot")
-        ])
-    return render_aba_os()
+        return render_aba_agenda() # Isso chama a função que vamos arrumar abaixo
+
+    return html.Div("Aba não encontrada")
 
 
 # --- CALLBACKS KIT ---
@@ -560,6 +586,14 @@ def manage_main(n_novo, n_edit, n_s, n_confirm_f, n_f, n_ex, status_atual):
     if not ctx.triggered:
         return [dash.no_update] * 13
 
+    # --- TRAVA DE SEGURANÇA ADICIONADA AQUI ---
+    trig_id = ctx.triggered[0]['prop_id']
+    trig_value = ctx.triggered[0]['value']
+
+    # Se o valor do gatilho for None ou 0, não faz nada (evita abrir no carregamento)
+    if not trig_value or trig_value == 0 or (isinstance(trig_value, list) and not any(trig_value)):
+        return [dash.no_update] * 13
+
     trig_id = ctx.triggered[0]['prop_id']
 
     # 1. Lógica para Editar O.S. Existente
@@ -673,16 +707,20 @@ def render_list(items):
      State('tec-manutencao', 'value'),
      State('status-manutencao', 'value'),
      State('desc-manutencao', 'value'),
-     State('modo-modal-agenda', 'data'),  # Aqui está o segredo (novo ou índice)
+     State('modo-modal-agenda', 'data'),
      State('tabs-agenda-cidades', 'active_tab'),
-     State('refresh-signal', 'data')],
+     State('refresh-signal', 'data'),
+     State('data-manutencao-simples', 'date')],  # 1. Lendo a data do calendário do modal
     prevent_initial_call=True
 )
-def salvar_ou_editar_agenda(n, os_val, nome, tel, tec, status, desc, modo, tab, sig):
+def salvar_ou_editar_agenda(n, os_val, nome, tel, tec, status, desc, modo, tab, sig, data_do_modal): # 2. Adicionado data_do_modal aqui
     if not n: return dash.no_update
 
     cidade = "Divinópolis" if tab == "ag-div" else "Itaúna"
     df_agenda = pd.read_csv(CSV_AGENDA, sep=',', encoding='latin-1')
+
+    # 3. Tratamento da data: Se não escolher nada, usa hoje. Formato: AAAA-MM-DD
+    data_final = data_do_modal.split('T')[0] if data_do_modal else datetime.now().strftime('%Y-%m-%d')
 
     # Dados formatados
     dados_linha = {
@@ -692,20 +730,20 @@ def salvar_ou_editar_agenda(n, os_val, nome, tel, tec, status, desc, modo, tab, 
         'telefone': tel,
         'status': status,
         'observacoes': f"{desc} [{cidade}]",
-        'mes_referencia': f"{datetime.now().month}/{datetime.now().year}"
+        'mes_referencia': data_final # 4. Agora salva a data completa vinculada ao calendário
     }
 
-    if modo == "novo":
-        # Adiciona nova linha
-        df_nova = pd.DataFrame([dados_linha])
-        df_agenda = pd.concat([df_agenda, df_nova], ignore_index=True)
+    # Lógica para salvar novo ou editar existente
+    if modo == 'novo':
+        df_new = pd.DataFrame([dados_linha])
+        df_agenda = pd.concat([df_agenda, df_new], ignore_index=True)
     else:
-        # Edita a linha existente usando o índice salvo no 'modo'
-        idx = int(modo)
-        for col, valor in dados_linha.items():
-            df_agenda.at[idx, col] = valor
+        # Se for edição, o 'modo' contém o índice da linha
+        for col, val in dados_linha.items():
+            df_agenda.at[int(modo), col] = val
 
     df_agenda.to_csv(CSV_AGENDA, index=False, sep=',', encoding='latin-1')
+
     return (sig or 0) + 1
 
     # Salva no arquivo CSV da agenda
@@ -851,13 +889,51 @@ def atualizar_progresso_kit(tecnico, sig):
 
 def render_aba_agenda():
     return html.Div([
-        # ... abas de cidades ...
+        # 1. Abas de Cidades
+        dbc.Tabs([
+            dbc.Tab(label="DIVINÓPOLIS", tab_id="ag-div"),
+            dbc.Tab(label="ITAÚNA", tab_id="ag-ita"),
+        ], id="tabs-agenda-cidades", active_tab="ag-div", className="mb-3"),
+
+        # 2. Linha com Calendário e Botão Lado a Lado
         dbc.Row([
-            dbc.Col(dbc.Button([html.I(className="bi bi-plus-circle me-2"), "Nova Manutenção"],
-                               id="btn-nova-agenda",  # <--- ESTE ID É A CHAVE
-                               color="success"), width="auto")
-        ], justify="end", className="mb-3"),
-        html.Div(id="cards-agenda-area")
+            dbc.Col([
+                html.Div([
+                    html.Label("Data:", style={"color": "white", "marginRight": "10px"}),
+                    dcc.DatePickerSingle(
+                        id='calendario-filtro',
+                        date=datetime.now().date(),
+                        display_format='DD/MM/YYYY',
+                    ),
+                ], className="d-flex align-items-center")
+            ], width="auto"),
+
+            dbc.Col(
+                dbc.Button([
+                    html.I(className="bi bi-plus-circle me-2"),
+                    "Nova Manutenção"
+                ],
+                id="btn-nova-agenda",
+                color="success"),
+                width="auto"
+            )
+        ], justify="between", className="mb-3"),
+
+        # 3. Onde os cards vão aparecer
+        dcc.Loading(
+            html.Div(
+                id="cards-agenda-area",
+                style={
+                    "display": "flex",
+                    "flexDirection": "row",
+                    "flexWrap": "wrap",
+                    "gap": "20px",
+                    "justifyContent": "start",
+                    "width": "100%"
+                }
+            ),
+            type="dot"
+        )
     ])
 
 
@@ -905,10 +981,11 @@ def mostrar_obs_final(status):
      State("agenda-tel", "value"), State("agenda-tec", "value"),
      State("agenda-status", "value"), State("agenda-data", "value"),
      State("agenda-obs", "value"), State("agenda-info-final", "value"),
-     State("tabs-agenda-cidades", "active_tab"), State("refresh-signal", "data")],
+     State("tabs-agenda-cidades", "active_tab"), State("refresh-signal", "data"),
+     State("calendario-filtro", "date")], # <--- ADICIONEI ESTA LINHA AQUI
     prevent_initial_call=True
 )
-def salvar_dados_agenda(n, os_id, cliente, tel, tec, status, data, obs, info_f, tab, sig):
+def salvar_dados_agenda(n, os_id, cliente, tel, tec, status, data, obs, info_f, tab, sig, data_calendario): # <--- ADICIONEI data_calendario AQUI
     if not n: return dash.no_update
 
     cidade = "Divinópolis" if tab == "ag-div" else "Itaúna"
@@ -923,9 +1000,14 @@ def salvar_dados_agenda(n, os_id, cliente, tel, tec, status, data, obs, info_f, 
 
     nova_linha = {
         'id_instalacao': os_id if os_id else "SN",
-        'tecnico': tec, 'descricao': cliente, 'status': status,
-        'telefone': tel, 'observacoes': obs_completa, 'data_inicio': data,
-        'mes_referencia': f"{MESES_PT.get(datetime.now().strftime('%B'))}/{datetime.now().year}"
+        'tecnico': tec,
+        'descricao': cliente,
+        'status': status,
+        'telefone': tel,
+        'observacoes': obs_completa,
+        'data_inicio': data,
+        # AQUI: Deve salvar a data do calendário em vez de "Janeiro/2026"
+        'mes_referencia': data_calendario.split('T')[0] if data_calendario else datetime.now().strftime('%Y-%m-%d')
     }
 
     df = pd.concat([df, pd.DataFrame([nova_linha])], ignore_index=True)
@@ -935,19 +1017,37 @@ def salvar_dados_agenda(n, os_id, cliente, tel, tec, status, data, obs, info_f, 
 
 @app.callback(
     Output("cards-agenda-area", "children"),
-    [Input("refresh-signal", "data"),
-     Input("tabs-agenda-cidades", "active_tab")]
+    [Input("tabs-agenda-cidades", "active_tab"),
+     Input("calendario-filtro", "date"),
+     Input("refresh-signal", "data")]
 )
-def render_agenda_cards_grandes(sig, tab):
+def atualizar_agenda(tab_cidade, data_selecionada, _):
     if not os.path.exists(CSV_AGENDA):
-        return html.Div("Nenhum agendamento encontrado.", className="text-center mt-5 text-muted")
+        return html.Div("Arquivo não encontrado.", className="text-white")
 
     df = pd.read_csv(CSV_AGENDA, sep=',', encoding='latin-1')
-    cidade_alvo = "Divinópolis" if tab == "ag-div" else "Itaúna"
-    df_cidade = df[df['observacoes'].str.contains(cidade_alvo, case=False, na=False)]
 
+    # 1. Filtro de Cidade (Corrigindo o erro de SyntaxWarning com o 'r' antes das aspas)
+    cidade_nome = "Divinópolis" if tab_cidade == "ag-div" else "Itaúna"
+    # Usamos r"..." para que o Python entenda os colchetes corretamente
+    df = df[df['observacoes'].str.contains(fr"\[{cidade_nome}\]", na=False)]
+
+    # 2. Filtro de Data (Histórico)
+    if data_selecionada:
+        # O calendário retorna 2026-01-22, pegamos apenas a parte da data
+        data_string = data_selecionada.split('T')[0]
+
+        # Filtramos o DataFrame pela coluna de data
+        df = df[df['mes_referencia'] == data_string]
+
+    # 3. Enviamos para a função que desenha os cards
+    return render_agenda_cards_grandes(df)
+
+
+def render_agenda_cards_grandes(df_cidade):  # <--- Note que agora ela recebe df_cidade
     if df_cidade.empty:
-        return html.Div(f"Nenhum serviço agendado para {cidade_alvo}.", className="text-center w-100 mt-5 text-muted")
+        return html.Div("Nenhum serviço agendado para esta data.",
+                        className="text-center w-100 mt-5 text-muted")
 
     tecnicos_no_arquivo = df_cidade['tecnico'].unique()
     colunas_tecnicos = []
@@ -959,50 +1059,70 @@ def render_agenda_cards_grandes(sig, tab):
         df_tec = df_cidade[df_cidade['tecnico'] == tec]
         cards_do_tecnico = []
 
-        for _, r in df_tec.iterrows():
-            # Construção do Card
+        for idx, r in df_tec.iterrows():
+            # Mantenha todo o seu código do "card = dbc.Card([...])" IGUAL aqui dentro
             card = dbc.Card([
                 dbc.CardBody([
                     html.Div([
-                        html.Span(f"O.S: {r['id_instalacao']}", className="badge bg-info text-dark fw-bold"),
+                        html.Div([
+                            html.Span(f"OS: {r['id_instalacao']}", className="badge bg-info text-dark fw-bold",
+                                      style={"fontSize": "11px"}),
+                            dbc.Badge(r['status'], color="success" if r['status'] == "Finalizada" else "warning",
+                                      style={"fontSize": "10px", "marginTop": "5px"}),
+                        ], style={"width": "80px", "display": "flex", "flexDirection": "column"}),
+                        html.Div([
+                            html.Strong(str(r['descricao']).upper(), className="text-truncate",
+                                        style={"color": "#fff", "fontSize": "14px", "display": "block"}),
+                            html.Small(str(r['observacoes']).split('[')[0], className="text-muted text-truncate",
+                                       style={"display": "block", "maxWidth": "100%"}),
+                        ], style={"flex": "1", "marginLeft": "15px", "marginRight": "15px", "overflow": "hidden"}),
                         dbc.Button(html.I(className="bi bi-pencil-square"),
-                                   id={'type': 'btn-editar-agenda', 'index': str(r.name)},
-                                   size="sm", color="warning", outline=True)
-                    ], className="d-flex justify-content-between align-items-center mb-3"),
-
-                    html.H5(r['descricao'], className="fw-bold mb-1", style={"color": "#fff"}),
-                    html.P(r['telefone'], className="text-muted small mb-3"),
-
-                    html.Div([
-                        html.Small("OBSERVAÇÕES:", className="text-info fw-bold d-block", style={"fontSize": "10px"}),
-                        html.P(str(r['observacoes']).split('[')[0],
-                               style={"fontSize": "13px", "color": "#ddd", "backgroundColor": "#1a1a1a",
-                                      "padding": "8px", "borderRadius": "5px"})
-                    ], className="mb-2"),
-
-                    dbc.Badge(r['status'],
-                              color="success" if r['status'] == "Finalizada" else "warning" if r[
-                                                                                                   'status'] == "Pendência" else "primary",
-                              className="w-100")
-                ], className="p-3")
-            ], className="mb-4 shadow-lg border-0", style={"backgroundColor": "#323232", "borderRadius": "12px"})
+                                   id={'type': 'btn-editar-agenda', 'index': str(idx)}, size="sm", color="warning",
+                                   outline=True)
+                    ], className="d-flex align-items-center")
+                ], style={"padding": "10px"})
+            ], className="mb-2 shadow-sm border-0",
+                style={"backgroundColor": "#323232", "borderRadius": "8px", "width": "380px", "height": "65px",
+                       "display": "flex", "justifyContent": "center"})
 
             cards_do_tecnico.append(card)
 
-        # Montagem da Coluna
         coluna = dbc.Col([
             html.Div([
-                html.H4([html.I(className="bi bi-person-workspace mb-2"), tec.upper()],
-                        className="text-center p-3 text-white fw-bold rounded-top mb-0",
-                        style={"backgroundColor": "#0d6efd", "fontSize": "13px"}),
-                html.Div(cards_do_tecnico, className="p-3", style={"backgroundColor": "#212529"})
+                html.H4(tec.upper(), className="text-center p-2 text-white fw-bold rounded-top mb-0",
+                        style={"backgroundColor": "#0d6efd", "fontSize": "14px"}),
+                html.Div(cards_do_tecnico, className="p-2 d-flex flex-column align-items-center",
+                         style={"backgroundColor": "#212529", "minHeight": "400px"})
             ], className="h-100 shadow-sm")
-        ], width=8, md=4, lg=8)
-
+        ], width="auto")
         colunas_tecnicos.append(coluna)
+
+    return dbc.Row(colunas_tecnicos, className="g-3")
+        # Montagem da Coluna
+    coluna = dbc.Col([
+        html.Div([
+            html.H4(tec.upper(),
+                    className="text-center p-2 text-white fw-bold rounded-top mb-0",
+                    style={"backgroundColor": "#0d6efd", "fontSize": "14px"}),
+            html.Div(cards_do_tecnico,
+                     className="p-2 d-flex flex-column align-items-center",
+                     style={"backgroundColor": "#212529", "minHeight": "400px"})
+        ], className="h-100 shadow-sm")
+    ], width="auto")
+
+    colunas_tecnicos.append(coluna)
 
     return dbc.Row(colunas_tecnicos, className="g-4")  # <--- AQUI TERMINA A FUNÇÃO
 
+@app.callback(
+    Output("container-justificativa", "style"),
+    [Input("status-manutencao", "value")]
+)
+def mostrar_justificativa_agenda(status):
+    # Se for Finalizada ou Pendência, mostra o campo. Se for Aberto, esconde.
+    if status in ["Finalizada", "Pendência"]:
+        return {"display": "block", "marginBottom": "15px"}
+    return {"display": "none"}
 
 @app.callback(
     [Output("modal-simples-id", "is_open"),
@@ -1013,39 +1133,52 @@ def render_agenda_cards_grandes(sig, tab):
      Output("status-manutencao", "value"),
      Output("desc-manutencao", "value"),
      Output("modo-modal-agenda", "data")],
-    [Input("btn-nova-agenda", "n_clicks"),  # <--- CORRIGIDO PARA O SEU ID REAL
+    [Input("btn-nova-agenda", "n_clicks"),
      Input({'type': 'btn-editar-agenda', 'index': ALL}, 'n_clicks'),
      Input("fechar-manutencao-simples", "n_clicks"),
-     Input("salvar-manutencao-simples", "n_clicks")],
-    [State("modal-simples-id", "is_open")],
+     Input("salvar-manutencao-simples", "n_clicks"),
+     Input("btn-excluir-agenda", "n_clicks")],  # <--- ID CORRIGIDO PARA O SEU
+    [State("modal-simples-id", "is_open"),
+     State("modo-modal-agenda", "data")],
     prevent_initial_call=True
 )
-def gerenciar_modal_manutencao(n_novo, n_editar, n_fechar, n_salvar, is_open):
+def gerenciar_modal_manutencao(n_novo, n_editar, n_fechar, n_salvar, n_excluir, is_open, modo_atual):
     ctx = dash.callback_context
     if not ctx.triggered:
-        return is_open, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, "novo"
+        raise dash.exceptions.PreventUpdate
 
     trig_id = ctx.triggered[0]['prop_id']
+    trig_value = ctx.triggered[0]['value']
 
-    # Se clicou em Nova Manutenção (usando o ID btn-nova-agenda)
-    if "btn-nova-agenda" in trig_id:
-        return True, "", "", "", None, "Aberto", "", "novo"
+    if not trig_value or trig_value == 0 or (isinstance(trig_value, list) and not any(trig_value)):
+        raise dash.exceptions.PreventUpdate
 
-    # Se clicou no lápis de editar manutenção
+    # --- LÓGICA DE EXCLUSÃO ---
+    if "btn-excluir-agenda" in trig_id: # <--- ID CORRIGIDO AQUI TAMBÉM
+        if modo_atual != "novo":
+            df = pd.read_csv(CSV_AGENDA, sep=',', encoding='latin-1')
+            df = df.drop(int(modo_atual))
+            df.to_csv(CSV_AGENDA, index=False, sep=',', encoding='latin-1')
+        return False, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, "novo"
+
+    # --- RESTANTE DA LÓGICA (SEM ALTERAÇÃO) ---
     if "btn-editar-agenda" in trig_id:
         import json
         idx = json.loads(trig_id.split('.')[0])['index']
         df = pd.read_csv(CSV_AGENDA, sep=',', encoding='latin-1')
         linha = df.loc[int(idx)]
-        return True, linha['id_instalacao'], linha['descricao'], linha['telefone'], linha['tecnico'], linha['status'], str(linha['observacoes']).split('[')[0], idx
+        return True, linha['id_instalacao'], linha['descricao'], linha['telefone'], linha['tecnico'], linha['status'], \
+               str(linha['observacoes']).split('[')[0], idx
 
-    # Se salvou ou fechou
-    return False, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, "novo"
+    if "btn-nova-agenda" in trig_id:
+        return True, "", "", "", None, "Aberto", "", "novo"
+
+    if any(x in trig_id for x in ["fechar-manutencao-simples", "salvar-manutencao-simples"]):
+        return False, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, "novo"
+
+    raise dash.exceptions.PreventUpdate
+
 
 # INICIALIZAÇÃO DO SERVIDOR (Apenas uma vez no final do arquivo)
 if __name__ == '__main__':
-
     app.run(debug=True, port=8050)
-
-
-
