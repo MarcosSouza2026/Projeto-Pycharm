@@ -31,3 +31,7 @@ id_instalacao,tecnico,descricao,data_inicio,status,materiais_checklist,mes_refer
 ,Pedro,CONSTRUTORA REMO,,Aberto,,2026-01-22,,,Câmera 8 com defeito. Equipamento instalado em poste de grande altura. [Itaúna],
 ,Pedro,CENTER POSTO FLEX,,Aberto,,2026-01-22,,,Setores com disparo frequente nas zonas 1 e 2. [Itaúna],
 ,Pedro,POSTO JK,,Aberto,,2026-01-22,,,"Quatro câmeras sem funcionamento (1, 2, 3 e 4). Aparentemente problema na fonte. [Itaúna]",
+3251.0,Giovanni,Costa Foods,,Aberto,,2026-01-23,,,Instalação do sistema de Alarme. [Divinópolis],
+,Giovanni,SUPERINTENDENCIA EDUCAÇÃO,,Aberto,,2026-01-23,,,Sistema de Monitoramento com data e hora incorretos. [Divinópolis],
+9573.0,Giovanni,AUTO PEÇAS MINAS GOIAS,,Finalizada,,2026-01-23,,,Acesso remoto Câmeras  [Divinópolis],
+,Giovanni,Hospital São João de Deus,,Aberto,,2026-01-23,,,Acesso Remoto Câmera [Divinópolis],

@@ -5,6 +5,7 @@ import pandas as pd
 import dash_bootstrap_components as dbc
 import json
 import os
+import dash_auth
 import base64
 import flask
 from flask import send_from_directory
@@ -28,8 +29,15 @@ if not os.path.exists(FOLDER_FILES):
 # COLUNAS ORIGINAIS + VALOR ACORDADO
 COLUNAS = ['id_instalacao', 'tecnico', 'descricao', 'data_inicio', 'status', 'materiais_checklist', 'mes_referencia',
            'responsavel', 'telefone', 'observacoes', 'valor_acordado']
+
+if not os.path.exists(CSV_AGENDA):
+    pd.DataFrame(columns=COLUNAS).to_csv(CSV_AGENDA, index=False, sep=',', encoding='latin-1')
 LISTA_TECNICOS = ['Giovanni', 'Roberto', 'Pedro', 'Jobert', 'Leonardo', 'Gustavo', 'Valdeci', 'Farley']
 
+USUARIOS_SENHAS = {
+    "Marcos": "H3g2z0b5",
+    "Pedro": "fearhunger2"
+    }
 MESES_PT = {
     "January": "Janeiro", "February": "Fevereiro", "March": "Março", "April": "Abril",
     "May": "Maio", "June": "Junho", "July": "Julho", "August": "Agosto",
@@ -68,6 +76,9 @@ app = dash.Dash(__name__,
                 external_stylesheets=[dbc.themes.DARKLY, dbc.icons.BOOTSTRAP],
                 suppress_callback_exceptions=True)
 
+app.server.secret_key = os.urandom(24)
+
+auth = dash_auth.BasicAuth(app, USUARIOS_SENHAS)
 
 @app.server.route('/download/<path:filename>')
 def download_file(filename):
@@ -1016,21 +1027,30 @@ def salvar_dados_agenda(n, os_id, cliente, tel, tec, status, data, obs, info_f, 
 
 
 @app.callback(
-    Output("cards-agenda-area", "children"),
-    [Input("tabs-agenda-cidades", "active_tab"),
-     Input("calendario-filtro", "date"),
-     Input("refresh-signal", "data")]
+    Output('cards-agenda-area', 'children'),
+    [Input('tabs-agenda-cidades', 'active_tab'),
+     Input('calendario-filtro', 'date'),  # <--- MUDADO DE 'agenda-calendario' PARA 'calendario-filtro'
+     Input('refresh-signal', 'data')]
 )
-def atualizar_agenda(tab_cidade, data_selecionada, _):
-    if not os.path.exists(CSV_AGENDA):
-        return html.Div("Arquivo não encontrado.", className="text-white")
+def atualizar_agenda(tab_cidade, data_sel, signal):
+    if not data_sel:
+        return html.Div("Selecione uma data no calendário.", className="text-white")
 
     df = pd.read_csv(CSV_AGENDA, sep=',', encoding='latin-1')
 
+    # Filtro de Data
+    data_formatada = data_sel.split('T')[0]
+    df_filtrado = df[df['mes_referencia'] == data_formatada]
+
+    # Filtro de Cidade
+    cidade_alvo = "Divinópolis" if tab_cidade == "ag-div" else "Itaúna"
+    df_filtrado = df_filtrado[df_filtrado['observacoes'].str.contains(fr"\[{cidade_alvo}\]", na=False)]
+
+    return render_agenda_cards_grandes(df_filtrado)
+
     # 1. Filtro de Cidade (Corrigindo o erro de SyntaxWarning com o 'r' antes das aspas)
-    cidade_nome = "Divinópolis" if tab_cidade == "ag-div" else "Itaúna"
-    # Usamos r"..." para que o Python entenda os colchetes corretamente
-    df = df[df['observacoes'].str.contains(fr"\[{cidade_nome}\]", na=False)]
+    cidade_nome = "Divinópolis" if tab_cidade == "ag-div" else "Itaúna"  # <--- Verifique o acento aqui
+    df_cidade = df[df['observacoes'].str.contains(fr"\[{cidade_nome}\]", na=False)]
 
     # 2. Filtro de Data (Histórico)
     if data_selecionada:
@@ -1044,13 +1064,13 @@ def atualizar_agenda(tab_cidade, data_selecionada, _):
     return render_agenda_cards_grandes(df)
 
 
-def render_agenda_cards_grandes(df_cidade):  # <--- Note que agora ela recebe df_cidade
-    if df_cidade.empty:
+def render_agenda_cards_grandes(df_cidade):
+    if df_cidade is None or df_cidade.empty:
         return html.Div("Nenhum serviço agendado para esta data.",
-                        className="text-center w-100 mt-5 text-muted")
+                        className="text-center w-100 mt-5 text-muted", style={"color": "white"})
 
-    tecnicos_no_arquivo = df_cidade['tecnico'].unique()
     colunas_tecnicos = []
+    tecnicos_no_arquivo = [t for t in df_cidade['tecnico'].unique() if pd.notna(t)]
 
     for tec in tecnicos_no_arquivo:
         if not tec or str(tec).strip() == "" or str(tec).lower() == "nan":
@@ -1060,25 +1080,34 @@ def render_agenda_cards_grandes(df_cidade):  # <--- Note que agora ela recebe df
         cards_do_tecnico = []
 
         for idx, r in df_tec.iterrows():
-            # Mantenha todo o seu código do "card = dbc.Card([...])" IGUAL aqui dentro
+            # Pegando os dados com segurança
+            id_inst = r.get('id_instalacao', 'S/N')
+            status = r.get('status', 'Aberto')
+            nome_cliente = str(r.get('descricao', 'SEM NOME')).upper()
+            # Limpa a observação para não mostrar o [Itaúna] no card
+            obs_limpa = str(r.get('observacoes', '')).split('[')[0]
+
+            # O SEU LAYOUT ORIGINAL VOLTOU AQUI:
             card = dbc.Card([
                 dbc.CardBody([
                     html.Div([
                         html.Div([
-                            html.Span(f"OS: {r['id_instalacao']}", className="badge bg-info text-dark fw-bold",
+                            html.Span(f"OS: {id_inst}", className="badge bg-info text-dark fw-bold",
                                       style={"fontSize": "11px"}),
-                            dbc.Badge(r['status'], color="success" if r['status'] == "Finalizada" else "warning",
+                            dbc.Badge(status, color="success" if status == "Finalizada" else "warning",
                                       style={"fontSize": "10px", "marginTop": "5px"}),
                         ], style={"width": "80px", "display": "flex", "flexDirection": "column"}),
+
                         html.Div([
-                            html.Strong(str(r['descricao']).upper(), className="text-truncate",
+                            html.Strong(nome_cliente, className="text-truncate",
                                         style={"color": "#fff", "fontSize": "14px", "display": "block"}),
-                            html.Small(str(r['observacoes']).split('[')[0], className="text-muted text-truncate",
+                            html.Small(obs_limpa, className="text-muted text-truncate",
                                        style={"display": "block", "maxWidth": "100%"}),
                         ], style={"flex": "1", "marginLeft": "15px", "marginRight": "15px", "overflow": "hidden"}),
+
                         dbc.Button(html.I(className="bi bi-pencil-square"),
-                                   id={'type': 'btn-editar-agenda', 'index': str(idx)}, size="sm", color="warning",
-                                   outline=True)
+                                   id={'type': 'btn-editar-agenda', 'index': str(idx)},
+                                   size="sm", color="warning", outline=True)
                     ], className="d-flex align-items-center")
                 ], style={"padding": "10px"})
             ], className="mb-2 shadow-sm border-0",
@@ -1087,17 +1116,20 @@ def render_agenda_cards_grandes(df_cidade):  # <--- Note que agora ela recebe df
 
             cards_do_tecnico.append(card)
 
+        # Coluna do Técnico
         coluna = dbc.Col([
             html.Div([
-                html.H4(tec.upper(), className="text-center p-2 text-white fw-bold rounded-top mb-0",
+                html.H4(str(tec).upper(), className="text-center p-2 text-white fw-bold rounded-top mb-0",
                         style={"backgroundColor": "#0d6efd", "fontSize": "14px"}),
                 html.Div(cards_do_tecnico, className="p-2 d-flex flex-column align-items-center",
                          style={"backgroundColor": "#212529", "minHeight": "400px"})
             ], className="h-100 shadow-sm")
-        ], width="auto")
+        ], width="auto")  # Mantive o auto, mas a Row vai cuidar do resto
+
         colunas_tecnicos.append(coluna)
 
-    return dbc.Row(colunas_tecnicos, className="g-3")
+    # O segredo para Itaúna mostrar todos é o flex-wrap aqui
+    return dbc.Row(colunas_tecnicos, className="g-3 d-flex flex-wrap")
         # Montagem da Coluna
     coluna = dbc.Col([
         html.Div([
@@ -1108,7 +1140,7 @@ def render_agenda_cards_grandes(df_cidade):  # <--- Note que agora ela recebe df
                      className="p-2 d-flex flex-column align-items-center",
                      style={"backgroundColor": "#212529", "minHeight": "400px"})
         ], className="h-100 shadow-sm")
-    ], width="auto")
+    ], width=12, lg=3, md=4, sm=6)
 
     colunas_tecnicos.append(coluna)
 
